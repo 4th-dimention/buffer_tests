@@ -151,23 +151,23 @@ buffer_measure_starts(Buffer_Measure_Starts *state, Buffer *buffer){
 }
 
 inline_4tech float
-measure_character(void *data, int offset, int stride, int *new_line, char character){
-    char *data_;
+measure_character(void *advance_data, int offset, int stride, int *new_line, char character){
+    char *advances;
     float width;
     
-    data_ = (char*)data + offset;
+    advances = (char*)advance_data + offset;
     switch (character){
     case 0: width = 0; *new_line = 1; break;
-    case '\n': width = *(float*)(data_ + stride * '\n'); *new_line = 1; break;
-    case '\r': width = *(float*)(data_ + stride * '\\') + *(float*)(data_ + stride * '\r'); break;
-    default: width = *(float*)(data_ + stride * character);
+    case '\n': width = *(float*)(advances + stride * '\n'); *new_line = 1; break;
+    case '\r': width = *(float*)(advances + stride * '\\') + *(float*)(advances + stride * '\r'); break;
+    default: width = *(float*)(advances + stride * character);
     }
     
     return(width);
 }
 
 internal_4tech void
-buffer_measure_widths(Buffer *buffer, void *width_data, int offset, int stride){
+buffer_measure_widths(Buffer *buffer, void *advance_data, int offset, int stride){
     float *widths;
     debug_4tech(int *starts);
     int line_count;
@@ -197,7 +197,7 @@ buffer_measure_widths(Buffer *buffer, void *width_data, int offset, int stride){
         next = data[++j];
         
         while (new_line == 0){
-            width += measure_character(width_data, offset, stride, &new_line, ch);
+            width += measure_character(advance_data, offset, stride, &new_line, ch);
             ch = next;
             next = data[++j];
         }
@@ -303,6 +303,89 @@ buffer_replace_range(Buffer *buffer, int start, int end, char *str, int len, int
     }
     
     return(result);
+}
+
+typedef struct{
+    int pos, index;
+} Cursor_With_Index;
+
+inline_4tech void
+write_cursor_with_index(Cursor_With_Index *positions, int *count, int pos){
+    positions[*count].index = *count;
+    positions[*count].pos = pos;
+    ++*count;
+}
+
+internal_4tech int
+buffer_quick_partition_cursors(Cursor_With_Index *positions, int start, int pivot){
+    int i;
+    int pivot_pos;
+    pivot_pos = positions[pivot].pos;
+    for (i = start; i < pivot; ++i){
+        if (positions[i].pos < pivot_pos){
+            Swap(positions[start], positions[i]);
+            ++start;
+        }
+    }
+    Swap(positions[start], positions[pivot]);
+    return start;
+}
+
+internal_4tech void
+buffer_quick_sort_cursors(Cursor_With_Index *positions, int start, int pivot){
+    int mid;
+    mid = buffer_quick_partition_cursors(positions, start, pivot);
+    if (start < mid - 1) buffer_quick_sort_cursors(positions, start, mid - 1);
+    if (mid + 1 < pivot) buffer_quick_sort_cursors(positions, mid + 1, pivot);
+}
+
+inline_4tech void
+buffer_sort_cursors(Cursor_With_Index *positions, int count){
+    Assert(count > 0);
+    buffer_quick_sort_cursors(positions, 0, count-1);
+}
+
+internal_4tech int
+buffer_quick_unpartition_cursors(Cursor_With_Index *positions, int start, int pivot){
+    int i;
+    int pivot_index;
+    pivot_index = positions[pivot].index;
+    for (i = start; i < pivot; ++i){
+        if (positions[i].index < pivot_index){
+            Swap(positions[start], positions[i]);
+            ++start;
+        }
+    }
+    Swap(positions[start], positions[pivot]);
+    return start;
+}
+
+internal_4tech void
+buffer_quick_unsort_cursors(Cursor_With_Index *positions, int start, int pivot){
+    int mid;
+    mid = buffer_quick_unpartition_cursors(positions, start, pivot);
+    if (start < mid - 1) buffer_quick_unsort_cursors(positions, start, mid - 1);
+    if (mid + 1 < pivot) buffer_quick_unsort_cursors(positions, mid + 1, pivot);
+}
+
+inline_4tech void
+buffer_unsort_cursors(Cursor_With_Index *positions, int count){
+    Assert(count > 0);
+    buffer_quick_unsort_cursors(positions, 0, count-1);
+}
+
+internal_4tech void
+buffer_update_cursors(Cursor_With_Index *sorted_positions, int count, int start, int end, int len){
+    Cursor_With_Index *position, *end_position;
+    int shift_amount;
+    
+    shift_amount = (len - (end - start));
+    
+    position = sorted_positions;
+    end_position = sorted_positions + count;
+    for (; position < end_position && position->pos < start; ++position);
+    for (; position < end_position && position->pos < end; ++position) position->pos = start;
+    for (; position < end_position; ++position) position->pos += shift_amount;
 }
 
 typedef enum{
@@ -573,6 +656,41 @@ buffer_batch_edit(Buffer *buffer, Buffer_Edit *sorted_edits, int edit_count){
     
     result = buffer_batch_edit_step(&state, buffer, sorted_edits, edit_count);
     Assert(result == 0);
+}
+
+internal_4tech void
+buffer_batch_edit_update_cursors(Cursor_With_Index *sorted_positions, int count, Buffer_Edit *sorted_edits, int edit_count){
+    Cursor_With_Index *position, *end_position;
+    Buffer_Edit *edit, *end_edit;
+    int start, end;
+    int shift_amount;
+    
+    position = sorted_positions;
+    end_position = sorted_positions + count;
+    
+    edit = sorted_edits;
+    end_edit = sorted_edits + edit_count;
+    
+    shift_amount = 0;
+    
+    for (; edit < end_edit && position < end_position; ++edit){
+        start = edit->start;
+        end = edit->end;
+        
+        for (; position->pos < start && position < end_position; ++position){
+            position->pos += shift_amount;
+        }
+        
+        for (; position->pos < end && position < end_position; ++position){
+            position->pos = start + shift_amount;
+        }
+        
+        shift_amount += (edit->len - (end - start));
+    }
+    
+    for (; position < end_position; ++position){
+        position->pos += shift_amount;
+    }
 }
 
 internal_4tech int
