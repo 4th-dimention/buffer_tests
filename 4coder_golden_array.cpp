@@ -21,10 +21,7 @@
 #define memmove_4tech memmove
 #define defines_4tech 1
 #define debug_4tech(x) x
-#endif
-
-#ifndef Assert
-#define Assert(x)
+#define assert_4tech assert
 #endif
 
 typedef struct{
@@ -48,7 +45,7 @@ typedef struct{
 inline_4tech Buffer_Stringify_Loop
 buffer_stringify_loop(Buffer *buffer, int start, int end, int page_size){
     Buffer_Stringify_Loop result;
-    if (0 <= start && start <= end && end < buffer->size){
+    if (0 <= start && start < end && end <= buffer->size){
         result.buffer = buffer;
         result.data = buffer->data + start;
         result.size = end - start;
@@ -93,9 +90,9 @@ buffer_count_newlines(Buffer *buffer, int start, int end){
     int i;
     int count;
     
-    Assert(0 <= start);
-    Assert(start <= end);
-    Assert(end < buffer->size);
+    assert_4tech(0 <= start);
+    assert_4tech(start <= end);
+    assert_4tech(end < buffer->size);
     
     data = buffer->data;
     count = 0;
@@ -128,7 +125,7 @@ buffer_measure_starts(Buffer_Measure_Starts *state, Buffer *buffer){
     data = buffer->data;
     size = buffer->size;
     
-    Assert(size < buffer->max);
+    assert_4tech(size < buffer->max);
     data[size] = '\n';
     
     result = 0;
@@ -167,18 +164,12 @@ buffer_remeasure_starts(Buffer *buffer, int line_start, int line_end, int line_s
     starts = buffer->line_starts;
     line_count = buffer->line_count;
     
-    Assert(0 <= line_start);
-    Assert(line_start <= line_end);
-    Assert(line_end < line_count);
-    Assert(line_count + line_shift <= buffer->line_max);
+    assert_4tech(0 <= line_start);
+    assert_4tech(line_start <= line_end);
+    assert_4tech(line_end < line_count);
+    assert_4tech(line_count + line_shift <= buffer->line_max);
     
     ++line_end;
-    if (line_shift != 0){
-        memmove_4tech(starts + line_end + line_shift, starts + line_end,
-                      sizeof(int)*(line_count - line_end));
-        line_count += line_shift;
-    }
-    
     if (text_shift != 0){
         line_i = line_end;
         starts += line_i;
@@ -188,24 +179,31 @@ buffer_remeasure_starts(Buffer *buffer, int line_start, int line_end, int line_s
         starts = buffer->line_starts;
     }
     
+    if (line_shift != 0){
+        memmove_4tech(starts + line_end + line_shift, starts + line_end,
+                      sizeof(int)*(line_count - line_end));
+        line_count += line_shift;
+    }
+    
     size = buffer->size;
     data = buffer->data;
     char_i = starts[line_start];
     line_i = line_start;
     
-    Assert(size < buffer->max);
+    assert_4tech(size < buffer->max);
     data[size] = '\n';
     
     start = char_i;
+    line_end += line_shift;
     for (; char_i <= size; ++char_i){
         if (data[char_i] == '\n'){
-            if (line_i >= line_end && start == starts[line_i]) break;
             starts[line_i++] = start;
             start = char_i + 1;
+            if (line_i >= line_end && start == starts[line_i]) break;
         }
     }
     
-    Assert(line_count >= 1);
+    assert_4tech(line_count >= 1);
     buffer->line_count = line_count;
 }
 
@@ -239,27 +237,29 @@ buffer_remeasure_widths(Buffer *buffer, void *advance_data, int stride,
     widths = buffer->line_widths;
     line_count = buffer->line_count;
     
-    Assert(0 <= line_start);
-    Assert(line_start <= line_end);
-    Assert(line_end < line_count);
-    Assert(line_count <= buffer->widths_max);
-    
+    assert_4tech(0 <= line_start);
+    assert_4tech(line_start <= line_end);
+    assert_4tech(line_end < line_count);
+    assert_4tech(line_count <= buffer->widths_max);
+
+    ++line_end;
     if (line_shift != 0){
-        memmove_4tech(widths + line_end + line_shift + 1, widths + line_end + 1,
-                sizeof(float)*(line_count - line_end - 1));
+        memmove_4tech(widths + line_end + line_shift, widths + line_end,
+                      sizeof(float)*(line_count - line_end));
         line_count += line_shift;
     }
     
     data = buffer->data;
     
-    Assert(buffer->size < buffer->max);
+    assert_4tech(buffer->size < buffer->max);
     data[buffer->size] = '\n';
     
     i = line_start;
     j = starts[i];
     
-    for (; i <= line_end; ++i){
-        Assert(j == starts[i]);
+    line_end += line_shift;    
+    for (; i < line_end; ++i){
+        assert_4tech(j == starts[i]);
         width = 0;
         
         for (ch = data[j]; ch != '\n'; ch = data[++j]){
@@ -273,7 +273,7 @@ buffer_remeasure_widths(Buffer *buffer, void *advance_data, int stride,
 
 inline_4tech void
 buffer_measure_widths(Buffer *buffer, void *advance_data, int stride){
-    Assert(buffer->line_count >= 1);
+    assert_4tech(buffer->line_count >= 1);
     buffer_remeasure_widths(buffer, advance_data, stride, 0, buffer->line_count-1, 0);
 }
 
@@ -283,9 +283,9 @@ buffer_get_line_index(Buffer *buffer, int pos, int l_bound, int u_bound){
     int start, end;
     int i;
     
-    Assert(0 <= l_bound);
-    Assert(l_bound <= u_bound);
-    Assert(u_bound <= buffer->line_count);
+    assert_4tech(0 <= l_bound);
+    assert_4tech(l_bound <= u_bound);
+    assert_4tech(u_bound <= buffer->line_count);
     
     start = l_bound;
     end = u_bound;
@@ -298,7 +298,7 @@ buffer_get_line_index(Buffer *buffer, int pos, int l_bound, int u_bound){
             start = i;
             break;
         }
-        Assert(start < end);
+        assert_4tech(start < end);
         if (start == end - 1) break;
     }
     
@@ -361,7 +361,7 @@ buffer_quick_sort_cursors(Cursor_With_Index *positions, int start, int pivot){
 
 inline_4tech void
 buffer_sort_cursors(Cursor_With_Index *positions, int count){
-    Assert(count > 0);
+    assert_4tech(count > 0);
     buffer_quick_sort_cursors(positions, 0, count-1);
 }
 
@@ -388,7 +388,7 @@ buffer_quick_unsort_cursors(Cursor_With_Index *positions, int start, int pivot){
 
 inline_4tech void
 buffer_unsort_cursors(Cursor_With_Index *positions, int count){
-    Assert(count > 0);
+    assert_4tech(count > 0);
     buffer_quick_unsort_cursors(positions, 0, count-1);
 }
 
@@ -479,7 +479,7 @@ buffer_cursor_seek(Buffer *buffer, Buffer_Seek seek,
     
     data = buffer->data;
     size = buffer->size;
-    Assert(size < buffer->max);
+    assert_4tech(size < buffer->max);
     data[size] = 0;
     
     advances = (char*)advance_data;
@@ -584,41 +584,52 @@ typedef struct{
 } Buffer_Edit;
 
 internal_4tech void
-buffer_invert_edit(Buffer *buffer, Buffer_Edit edit, Buffer_Edit *inverse, char *strings, int *str_pos, int max){
+buffer_invert_edit_shift(Buffer *buffer, Buffer_Edit edit, Buffer_Edit *inverse, char *strings, int *str_pos, int max, int shift_amount){
     int pos;
     int len;
     
     pos = *str_pos;
     len = edit.end - edit.start;
-    Assert(pos + len <= max);
+    assert_4tech(pos + len <= max);
     *str_pos = pos + len;
     
     inverse->str_start = pos;
     inverse->len = len;
-    inverse->start = edit.start;
-    inverse->end = edit.start + edit.len;
+    inverse->start = edit.start + shift_amount;
+    inverse->end = edit.start + edit.len + shift_amount;
     memcpy_4tech(strings + pos, buffer->data + edit.start, len);
+}
+
+inline_4tech void
+buffer_invert_edit(Buffer *buffer, Buffer_Edit edit, Buffer_Edit *inverse, char *strings, int *str_pos, int max){
+    buffer_invert_edit_shift(buffer, edit, inverse, strings, str_pos, max, 0);
 }
 
 typedef struct{
     int i;
+    int shift_amount;
     int len;
 } Buffer_Invert_Batch;
 
 internal_4tech int
 buffer_invert_batch(Buffer_Invert_Batch *state, Buffer *buffer, Buffer_Edit *edits, int count,
                     Buffer_Edit *inverse, char *strings, int *str_pos, int max){
-    Buffer_Edit *edit;
+    Buffer_Edit *edit, *inv_edit;
+    int shift_amount;
     int result;
     int i;
     
     result = 0;
     i = state->i;
+    shift_amount = state->shift_amount;
     
     edit = edits + i;
-    for (; i < count; ++i){
+    inv_edit = inverse + i;
+    
+    for (; i < count; ++i, ++edit, ++inv_edit){
         if (*str_pos + edit->end - edit->start <= max){
-            buffer_invert_edit(buffer, *edit, inverse + i, strings, str_pos, max);
+            buffer_invert_edit_shift(buffer, *edit, inv_edit, strings, str_pos, max, shift_amount);
+            shift_amount += (edit->len - (edit->end - edit->start));
         }
         else{
             result = 1;
@@ -627,6 +638,7 @@ buffer_invert_batch(Buffer_Invert_Batch *state, Buffer *buffer, Buffer_Edit *edi
     }
     
     state->i = i;
+    state->shift_amount = shift_amount;
     
     return(result);
 }
@@ -708,7 +720,7 @@ buffer_batch_edit(Buffer *buffer, Buffer_Edit *sorted_edits, char *strings, int 
     
     debug_4tech(result =)
         buffer_batch_edit_step(&state, buffer, sorted_edits, strings, edit_count);
-    Assert(result == 0);
+    assert_4tech(result == 0);
 }
 
 internal_4tech void
@@ -754,7 +766,7 @@ buffer_find_hard_start(Buffer *buffer, int line_start, int *all_whitespace, int 
     int result;
     char c;
     
-    *all_space = 0;
+    *all_space = 1;
     *preferred_indent = 0;
     
     data = buffer->data;
@@ -785,7 +797,7 @@ buffer_eol_convert_in(Buffer *buffer){
     
     data = buffer->data;
     size = buffer->size;
-    Assert(size < buffer->max);
+    assert_4tech(size < buffer->max);
     data[size] = 0;
     
     for (i = 0; i < size; ++i){
@@ -813,14 +825,14 @@ buffer_eol_convert_out(Buffer *buffer){
     
     data = buffer->data;
     size = buffer->size;
-    Assert(buffer_eol_convert_out_size(buffer) < buffer->max);
-    data[size] = 0;
+    assert_4tech(buffer_eol_convert_out_size(buffer) < buffer->max);
     
     for (i = 0; i < size; ++i){
         if (data[i] == '\n'){
-            memmove_4tech(data + i, data + i + 1, size - i);
+            memmove_4tech(data + i + 1, data + i, size - i);
             data[i] = '\r';
             ++i;
+            ++size;
         }
     }
     
