@@ -13,17 +13,6 @@
 
 // TOP
 
-#ifndef defines_4tech
-#define inline_4tech inline
-#define internal_4tech static
-#define memset_4tech memset
-#define memcpy_4tech memcpy
-#define memmove_4tech memmove
-#define defines_4tech 1
-#define debug_4tech(x) x
-#define assert_4tech assert
-#endif
-
 typedef struct{
     char *data;
     int size, max;
@@ -207,22 +196,6 @@ buffer_remeasure_starts(Buffer *buffer, int line_start, int line_end, int line_s
     buffer->line_count = line_count;
 }
 
-inline_4tech float
-measure_character(void *advance_data, int stride, char character){
-    char *advances;
-    float width;
-    
-    advances = (char*)advance_data;
-    switch (character){
-    case 0: width = *(float*)(advances + stride * '\\') + *(float*)(advances + stride * '0'); break;
-    case '\n': width = 0; break;
-    case '\r': width = *(float*)(advances + stride * '\\') + *(float*)(advances + stride * '\r'); break;
-    default: width = *(float*)(advances + stride * character);
-    }
-    
-    return(width);
-}
-
 internal_4tech void
 buffer_remeasure_widths(Buffer *buffer, void *advance_data, int stride,
                         int line_start, int line_end, int line_shift){
@@ -278,6 +251,24 @@ buffer_measure_widths(Buffer *buffer, void *advance_data, int stride){
     buffer_remeasure_widths(buffer, advance_data, stride, 0, buffer->line_count-1, 0);
 }
 
+internal_4tech void
+buffer_measure_wrap_y(Buffer *buffer, float *wraps,
+                      void *advance_data, int stride, float font_height, float max_width){
+    float *widths;
+    float y_pos;
+    int i, line_count;
+
+    line_count = buffer->line_count;
+    widths = buffer->line_widths;
+    y_pos = 0;
+
+    for (i = 0; i < line_count; ++i){
+        wraps[i] = y_pos;
+        if (widths[i] == 0) y_pos += font_height;
+        else y_pos += font_height*ceil_4tech(widths[i]/max_width);
+    }
+}
+
 internal_4tech int
 buffer_get_line_index(Buffer *buffer, int pos, int l_bound, int u_bound){
     int *lines;
@@ -304,6 +295,27 @@ buffer_get_line_index(Buffer *buffer, int pos, int l_bound, int u_bound){
     }
     
     return(start);
+}
+
+internal_4tech int
+buffer_get_line_index_from_wrapped_y(float *wraps, float y, float font_height, int l_bound, int u_bound){
+    int start, end, i, result;
+    start = l_bound;
+    end = u_bound;
+    for (;;){
+        i = (start + end) / 2;
+        if (wraps[i]+font_height <= y) start = i;
+        else if (wraps[i] > y) end = i;
+        else{
+            result = i;
+            break;
+        }
+        if (start >= end - 1){
+            result = start;
+            break;
+        }
+    }
+    return(result);
 }
 
 internal_4tech int
@@ -404,66 +416,6 @@ buffer_update_cursors(Cursor_With_Index *sorted_positions, int count, int start,
     for (; position >= sorted_positions && position->pos >= end; --position) position->pos += shift_amount;
     for (; position >= sorted_positions && position->pos >= start; --position) position->pos = start;
 }
-
-typedef enum{
-    buffer_seek_pos,
-    buffer_seek_wrapped_xy,
-    buffer_seek_unwrapped_xy,
-    buffer_seek_line_char
-} Buffer_Seek_Type;
-
-typedef struct{
-    Buffer_Seek_Type type;
-    union{
-        struct { int pos; };
-        struct { int round_down; float x, y; };
-        struct { int line, character; };
-    };
-} Buffer_Seek;
-
-inline_4tech Buffer_Seek
-seek_pos(int pos){
-    Buffer_Seek result;
-    result.type = buffer_seek_pos;
-    result.pos = pos;
-    return(result);
-}
-
-inline_4tech Buffer_Seek
-seek_wrapped_xy(float x, float y, int round_down){
-    Buffer_Seek result;
-    result.type = buffer_seek_wrapped_xy;
-    result.x = x;
-    result.y = y;
-    result.round_down = round_down;
-    return(result);
-}
-
-inline_4tech Buffer_Seek
-seek_unwrapped_xy(float x, float y, int round_down){
-    Buffer_Seek result;
-    result.type = buffer_seek_unwrapped_xy;
-    result.x = x;
-    result.y = y;
-    result.round_down = round_down;
-    return(result);
-}
-
-inline_4tech Buffer_Seek
-seek_line_char(int line, int character){
-    Buffer_Seek result;
-    result.type = buffer_seek_line_char;
-    result.line = line;
-    result.character = character;
-    return(result);
-}
-
-typedef struct{
-    int pos;
-    int line, character;
-    float unwrapped_x, unwrapped_y;
-    float wrapped_x, wrapped_y;
-} Full_Cursor;
 
 internal_4tech Full_Cursor
 buffer_cursor_seek(Buffer *buffer, Buffer_Seek seek, float max_width, float font_height,
@@ -628,26 +580,8 @@ buffer_cursor_from_wrapped_xy(Buffer *buffer, float x, float y, int round_down, 
                               float max_width, float font_height, void *advance_data, int stride){
     Full_Cursor result;
     int line_index;
-    int start, end, i;
 
-    // NOTE(allen): binary search lines on wrapped y position
-    // TODO(allen): pull this out once other wrap handling code is ready
-    start = 0;
-    end = buffer->line_count;
-    for (;;){
-        i = (start + end) / 2;
-        if (wraps[i]+font_height <= y) start = i;
-        else if (wraps[i] > y) end = i;
-        else{
-            line_index = i;
-            break;
-        }
-        if (start >= end - 1){
-            line_index = start;
-            break;
-        }
-    }
-
+    line_index = buffer_get_line_index_from_wrapped_y(wraps, y, font_height, 0, buffer->line_count);
     result = make_cursor_hint(line_index, buffer->line_starts, wraps, font_height);
     result = buffer_cursor_seek(buffer, seek_wrapped_xy(x, y, round_down), max_width, font_height,
                                 advance_data, stride, result);
@@ -923,6 +857,26 @@ typedef struct{
     float x1, y1;
 } Buffer_Render_Item;
 
+inline_4tech void
+write_render_item(Buffer_Render_Item *item, int index, int glyphid,
+                  float x, float y, float w, float h){
+    item->index = index;
+    item->glyphid = glyphid;
+    item->x0 = x;
+    item->y0 = y;
+    item->x1 = x + w;
+    item->y1 = y + h;
+}
+
+inline_4tech float
+write_render_item_inline(Buffer_Render_Item *item, int index, int glyphid,
+                         float x, float y, void *advance_data, int stride, float h){
+    float ch_width;
+    ch_width = measure_character(advance_data, stride, (char)glyphid);
+    write_render_item(item, index, glyphid, x, y, ch_width, h);
+    return(ch_width);
+}
+
 internal_4tech void
 buffer_get_render_data(Buffer *buffer, float *wraps, Buffer_Render_Item *items, int max, int *count,
                        float port_x, float port_y, float scroll_x, float scroll_y, int wrapped,
@@ -934,7 +888,7 @@ buffer_get_render_data(Buffer *buffer, float *wraps, Buffer_Render_Item *items, 
     float shift_x, shift_y;
     float x, y;
     int i, item_i;
-    float ch_width;
+    float ch_width, ch_width_sub;
     char ch;
 
     data = buffer->data;
@@ -974,13 +928,7 @@ buffer_get_render_data(Buffer *buffer, float *wraps, Buffer_Render_Item *items, 
 
         switch (ch){
         case '\n':
-            ch_width = measure_character(advance_data, stride, ' ');
-            item->index = i;
-            item->glyphid = ' ';
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + ch_width;
-            item->y1 = y + font_height;
+            write_render_item_inline(item, i, ' ', x, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
 
@@ -989,81 +937,42 @@ buffer_get_render_data(Buffer *buffer, float *wraps, Buffer_Render_Item *items, 
             break;
 
         case 0:
-            ch_width = measure_character(advance_data, stride, '\\');
-            item->index = i;
-            item->glyphid = '\\';
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + ch_width;
-            item->y1 = y + font_height;
+            ch_width = write_render_item_inline(item, i, '\\', x, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
             x += ch_width;
 
-            ch_width = measure_character(advance_data, stride, '0');
-            item->index = i;
-            item->glyphid = '0';
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + ch_width;
-            item->y1 = y + font_height;
+            ch_width = write_render_item_inline(item, i, '0', x, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
             x += ch_width;
             break;
 
         case '\r':
-            ch_width = measure_character(advance_data, stride, '\\');
-            item->index = i;
-            item->glyphid = '\\';
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + ch_width;
-            item->y1 = y + font_height;
+            ch_width = write_render_item_inline(item, i, '\\', x, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
             x += ch_width;
 
-            ch_width = measure_character(advance_data, stride, 'r');
-            item->index = i;
-            item->glyphid = 'r';
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + ch_width;
-            item->y1 = y + font_height;
+            ch_width = write_render_item_inline(item, i, 'r', x, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
             x += ch_width;
             break;
 
         case '\t':
-            item->index = i;
-            item->glyphid = '\\';
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + measure_character(advance_data, stride, '\\');
-            item->y1 = y + font_height;
+            ch_width_sub = write_render_item_inline(item, i, '\\', x, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
 
-            item->index = i;
-            item->glyphid = 't';
-            item->x0 = (item-1)->x1;
-            item->y0 = y;
-            item->x1 = item->x0 + measure_character(advance_data, stride, 't');
-            item->y1 = y + font_height;
+            write_render_item_inline(item, i, 't', x + ch_width_sub, y, advance_data, stride, font_height);
             ++item_i;
             ++item;
             x += ch_width;
             break;
 
         default:
-            item->index = i;
-            item->glyphid = ch;
-            item->x0 = x;
-            item->y0 = y;
-            item->x1 = x + ch_width;
-            item->y1 = y + font_height;
+            write_render_item(item, i, ch, x, y, ch_width, font_height);
             ++item_i;
             ++item;
             x += ch_width;
