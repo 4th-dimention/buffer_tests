@@ -52,6 +52,10 @@ ROUNDPOT32(unsigned int v){
 #endif
 #define hard_assert_4tech(x) assert(x)
 
+#ifdef __linux__
+#define memzero_4tech(x) memset_4tech(&(x), 0, sizeof(x))
+#endif
+
 #include "4coder_shared.cpp"
 #include "4coder_golden_array.cpp"
 #include "4coder_gap_buffer.cpp"
@@ -78,7 +82,7 @@ ROUNDPOT32(unsigned int v){
 #undef Buffer_Stringify_Type
 #undef Buffer_Backify_Type
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <Windows.h>
 
 typedef unsigned long long time_int;
@@ -110,6 +114,37 @@ time_int get_time(){
     return(result);
 }
 
+#elif defined(__linux__)
+#include <time.h>
+
+typedef unsigned long long time_int;
+
+int time_init(unsigned long long *resolution){
+    int result;
+    struct timespec res;
+    result = 0;
+    
+    if (!clock_getres(CLOCK_MONOTONIC, &res)){
+        result = 1;
+	if (res.tv_sec > 0 || res.tv_nsec == 0) *resolution = 0;
+	else *resolution = (unsigned long long)(1000000/res.tv_nsec);
+    }
+
+    return(result);
+}
+
+time_int get_time(){
+    time_int result;
+    struct timespec time;
+    
+    result = 0;
+    if (!clock_gettime(CLOCK_MONOTONIC, &time)){
+        result = (time.tv_sec * 1000000) + (time.tv_nsec / 1000);
+    }
+    
+    return(result);
+}
+
 #else
 #error Timer not supported by this platform
 #endif
@@ -131,7 +166,7 @@ typedef struct File_Data{
     int size;
 } File_Data;
 
-File_Data get_file(char *filename){
+File_Data get_file(const char *filename){
     FILE *file;
     File_Data result;
     
@@ -262,7 +297,7 @@ typedef struct Buffer_Set{
 
 template<typename Buffer_Init_Type, typename Buffer_Type> void
 init_buffer(Buffer_Type *buffer, File_Data file, void *scratch, int scratch_size){
-    *buffer = {};
+    memzero_4tech(*buffer);
     Buffer_Init_Type init;
     for (init = buffer_begin_init(buffer, file.data, file.size);
          buffer_init_need_more(&init);){
@@ -331,7 +366,8 @@ measure_starts(Buffer_Type *buffer){
     buffer->line_starts = (int*)malloc(max*sizeof(int));
     buffer->line_max = max;
 
-    Buffer_Measure_Starts state = {};
+    Buffer_Measure_Starts state;
+    memzero_4tech(state);
     for (;buffer_measure_starts(&state, buffer);){
         int max = buffer->line_max;
         int count = state.count;
@@ -512,11 +548,11 @@ int main(){
     
     Record_Statistics init_rec, starts_rec, widths_rec;
     
-    initialization_test(&buffers, file, 100, scratch, scratch_size, &init_rec);
+    initialization_test(&buffers, file, 10, scratch, scratch_size, &init_rec);
     stream_check_test(&buffers, scratch, scratch_size);
     
-    measure_starts_test(&buffers, 100, scratch, scratch_size, &starts_rec);
-    measure_widths_test(&buffers, 100, scratch, scratch_size, &widths_rec);
+    measure_starts_test(&buffers, 10, scratch, scratch_size, &starts_rec);
+    measure_widths_test(&buffers, 10, scratch, scratch_size, &widths_rec);
     
     Time_Record expected_file_open;
     expected_file_open = init_rec.expected + starts_rec.expected + widths_rec.expected;

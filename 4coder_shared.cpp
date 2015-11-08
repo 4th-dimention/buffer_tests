@@ -24,6 +24,10 @@
 #define memset_4tech memset
 #endif
 
+#ifndef memzero_4tech
+#define memzero_4tech(x) ((x) = {})
+#endif
+
 #ifndef memcpy_4tech
 #define memcpy_4tech memcpy
 #endif
